@@ -38,7 +38,7 @@
             </h1>
         </div>
         <div id="connection-status" class="text-xs font-mono px-3 py-1 rounded-full bg-yellow-500/10 text-yellow-400 border border-yellow-500/30">
-            Connecting to Cloud...
+            Initializing...
         </div>
     </header>
 
@@ -53,16 +53,16 @@
 
             <!-- Mode Selection Tabs -->
             <div class="grid grid-cols-2 gap-2 bg-gray-900/80 p-1.5 rounded-xl border border-gray-800">
-                <button id="tab-cam" onclick="switchMode('cam')" class="py-2 rounded-lg text-xs font-medium transition-all bg-cyan-500 text-gray-950 font-bold shadow-lg">
+                <button id="tab-cam" onclick="switchMode('cam')" class="py-2 rounded-lg text-xs font-medium transition-all text-gray-400 hover:text-white">
                     <i class="fa-solid fa-video mr-1"></i> Cam Node
                 </button>
-                <button id="tab-viewer" onclick="switchMode('viewer')" class="py-2 rounded-lg text-xs font-medium transition-all text-gray-400 hover:text-white">
+                <button id="tab-viewer" onclick="switchMode('viewer')" class="py-2 rounded-lg text-xs font-medium transition-all bg-cyan-500 text-gray-950 font-bold shadow-lg">
                     <i class="fa-solid fa-desktop mr-1"></i> Control Hub
                 </button>
             </div>
 
             <!-- Cam Node Settings -->
-            <div id="section-cam" class="flex flex-col space-y-4">
+            <div id="section-cam" class="hidden flex flex-col space-y-4">
                 <div class="bg-blue-950/30 border border-blue-900/50 p-3.5 rounded-xl space-y-2">
                     <label class="block text-[11px] font-mono text-cyan-400 uppercase tracking-wider">කැමරා ID එක දෙන්න (cam-1 සිට cam-6)</label>
                     <input type="text" id="custom-my-id" placeholder="උදා: cam-1" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-300 font-mono text-sm focus:border-cyan-400 focus:outline-none" value="cam-1">
@@ -83,7 +83,7 @@
             </div>
 
             <!-- Viewer Hub Settings -->
-            <div id="section-viewer" class="hidden flex flex-col space-y-4">
+            <div id="section-viewer" class="flex flex-col space-y-4">
                 <div class="bg-blue-950/30 border border-blue-900/50 p-3.5 rounded-xl space-y-3">
                     <p class="text-[11px] text-gray-300">Control Hub එකෙන් කැමරා 6ම එකවර Connect කරගැනීමට පහත බොත්තම ඔබන්න:</p>
                     <button onclick="connectAllCams()" class="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-gray-950 font-bold rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-sm">
@@ -141,6 +141,7 @@
         let currentFacingMode = 'environment';
         let silentAudioCtx = null;
         const camIds = ['cam-1', 'cam-2', 'cam-3', 'cam-4', 'cam-5', 'cam-6'];
+        let currentMode = 'viewer'; // Default startup mode
 
         function initPeer(customId = null) {
             if (peer) {
@@ -159,7 +160,7 @@
             peer = customId ? new Peer(customId, peerOptions) : new Peer(peerOptions);
 
             peer.on('open', (id) => {
-                updateStatus('Cloud Connected: ' + id, 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30');
+                updateStatus('Connected: ' + id, 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30');
             });
 
             peer.on('disconnected', () => {
@@ -174,15 +175,16 @@
             peer.on('error', (err) => {
                 console.error("PeerJS Error:", err);
                 if (err.type === 'unavailable-id') {
-                    alert("මෙම ID එක දැනටමත් භාවිතයේ ඇත. කරුණාකර වෙනත් නමක් දෙන්න (උදා: cam-2).");
+                    alert("මෙම ID එක දැනටමත් භාවිතයේ ඇත. කරුණාකර වෙනත් නමක් දෙන්න.");
                 }
                 updateStatus('Error: ' + err.type, 'bg-red-500/10 text-red-400 border-red-500/30');
             });
 
-            // Camera Node receiving connection from Control Hub
+            // When a call comes in (from Control Hub)
             peer.on('call', (call) => {
-                if (myStream) {
-                    call.answer(myStream); // Send camera stream back to hub
+                if (currentMode === 'cam' && myStream) {
+                    // Answer the call by sending back the active phone camera stream
+                    call.answer(myStream);
                 } else {
                     call.answer();
                 }
@@ -195,8 +197,9 @@
                 alert("Please enter a valid Camera ID!");
                 return;
             }
+            currentMode = 'cam';
             initPeer(customId);
-            alert("Camera ID registered: " + customId);
+            alert("Camera Node ID set to: " + customId);
         }
 
         function updateStatus(text, cssClass) {
@@ -206,6 +209,7 @@
         }
 
         function switchMode(mode) {
+            currentMode = mode;
             const tabCam = document.getElementById('tab-cam');
             const tabViewer = document.getElementById('tab-viewer');
             const secCam = document.getElementById('section-cam');
@@ -221,6 +225,8 @@
                 tabCam.className = "py-2 rounded-lg text-xs font-medium transition-all text-gray-400 hover:text-white";
                 secViewer.classList.remove('hidden');
                 secCam.classList.add('hidden');
+                // Re-initialize as control hub viewer master ID if switched to viewer
+                initPeer('control-hub-viewer-' + Math.floor(Math.random() * 1000));
             }
         }
 
@@ -238,7 +244,7 @@
                 document.getElementById('local-video').srcObject = myStream;
                 playSilentAudio();
 
-                alert("Camera Started Successfully! Stream is ready.");
+                alert("Camera Stream Started Successfully! You can now minimize the browser.");
             } catch (err) {
                 console.error(err);
                 alert("Camera Error: " + err.message);
@@ -268,16 +274,15 @@
             }
         }
 
-        // Control Hub calling cameras without requesting local laptop camera permission
+        // Control Hub calling cameras without ever requesting laptop cam permission
         function connectAllCams() {
             document.getElementById('grid-status').innerText = "Connecting 6 Cams...";
 
-            camIds.initCall = true;
             camIds.forEach((id, index) => {
                 const slotNum = index + 1;
                 
                 try {
-                    // Call remote camera peer with an empty stream so laptop camera permission is never requested
+                    // Call remote camera peer using an empty media stream so laptop camera is never prompted
                     const call = peer.call(id, new MediaStream());
 
                     if (call) {
@@ -328,10 +333,9 @@
             link.click();
         }
 
-        // Initialize default ID as Control Hub viewer on load (No laptop cam prompt)
+        // Initialize on load as Control Hub Viewer (No laptop camera prompt)
         window.onload = () => {
-            initPeer('control-hub-master');
-            switchMode('viewer'); // Default open as Control Hub viewer
+            switchMode('viewer');
         };
     </script>
 </body>
