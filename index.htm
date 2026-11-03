@@ -20,7 +20,7 @@
         }
         .cyber-font { font-family: 'Orbitron', sans-serif; }
         .glass-panel {
-            background: rgba(17, 24, 39, 0.8);
+            background: rgba(17, 24, 39, 0.85);
             backdrop-filter: blur(16px);
             border: 1px solid rgba(59, 130, 246, 0.2);
             box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
@@ -110,7 +110,6 @@
             </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 flex-1">
-                <!-- Camera Slot 1 to 6 -->
                 <script>
                     for(let i=1; i<=6; i++) {
                         document.write(`
@@ -143,7 +142,6 @@
         let silentAudioCtx = null;
         const camIds = ['cam-1', 'cam-2', 'cam-3', 'cam-4', 'cam-5', 'cam-6'];
 
-        // Robust Peer Initialization with Google STUN servers and Auto-Reconnect
         function initPeer(customId = null) {
             if (peer) {
                 try { peer.destroy(); } catch(e) {}
@@ -181,12 +179,12 @@
                 updateStatus('Error: ' + err.type, 'bg-red-500/10 text-red-400 border-red-500/30');
             });
 
+            // Camera Node receiving connection from Control Hub
             peer.on('call', (call) => {
                 if (myStream) {
-                    call.answer(myStream);
+                    call.answer(myStream); // Send camera stream back to hub
                 } else {
-                    // Answer with empty stream if local stream is not yet ready
-                    call.answer(new MediaStream());
+                    call.answer();
                 }
             });
         }
@@ -198,6 +196,7 @@
                 return;
             }
             initPeer(customId);
+            alert("Camera ID registered: " + customId);
         }
 
         function updateStatus(text, cssClass) {
@@ -239,7 +238,7 @@
                 document.getElementById('local-video').srcObject = myStream;
                 playSilentAudio();
 
-                alert("Camera Started Successfully! You can now minimize the browser.");
+                alert("Camera Started Successfully! Stream is ready.");
             } catch (err) {
                 console.error(err);
                 alert("Camera Error: " + err.message);
@@ -269,23 +268,18 @@
             }
         }
 
-        // Improved multi-cam connection loop with retry mechanism
-        async function connectAllCams() {
+        // Control Hub calling cameras without requesting local laptop camera permission
+        function connectAllCams() {
             document.getElementById('grid-status').innerText = "Connecting 6 Cams...";
-            
-            let dummyStream;
-            try {
-                dummyStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-            } catch(e) {
-                dummyStream = new MediaStream();
-            }
 
+            camIds.initCall = true;
             camIds.forEach((id, index) => {
                 const slotNum = index + 1;
                 
-                // Attempt call
                 try {
-                    const call = peer.call(id, dummyStream);
+                    // Call remote camera peer with an empty stream so laptop camera permission is never requested
+                    const call = peer.call(id, new MediaStream());
+
                     if (call) {
                         call.on('stream', (remoteStream) => {
                             showStreamInSlot(slotNum, remoteStream);
@@ -334,9 +328,10 @@
             link.click();
         }
 
-        // Initialize default ID on load
+        // Initialize default ID as Control Hub viewer on load (No laptop cam prompt)
         window.onload = () => {
-            initPeer('cam-1');
+            initPeer('control-hub-master');
+            switchMode('viewer'); // Default open as Control Hub viewer
         };
     </script>
 </body>
