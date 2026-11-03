@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ZOREX CLOUD CCTV - Room Request System</title>
+    <title>ZOREX CLOUD CCTV - Direct Stream Push System</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- PeerJS for WebRTC Signaling -->
@@ -64,8 +64,8 @@
             <!-- Host / Control Hub Panel -->
             <div id="section-host" class="flex flex-col space-y-4">
                 <div class="bg-blue-950/30 border border-blue-900/50 p-3.5 rounded-xl space-y-2">
-                    <label class="block text-[11px] font-mono text-cyan-400 uppercase tracking-wider">CCTV Room එකක් සාදන්න (Host ID)</label>
-                    <input type="text" id="host-room-id" placeholder="උදා: my-cctv-room" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-300 font-mono text-sm focus:border-cyan-400 focus:outline-none" value="zorex-room-01">
+                    <label class="block text-[11px] font-mono text-cyan-400 uppercase tracking-wider">CCTV Room ID (Host)</label>
+                    <input type="text" id="host-room-id" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-300 font-mono text-sm focus:outline-none" value="zorex-room-01">
                     <button onclick="createCCTVRoom()" class="w-full py-2 bg-cyan-500 hover:bg-cyan-400 text-gray-950 font-bold rounded-lg transition text-xs">
                         Create & Open Room
                     </button>
@@ -84,15 +84,15 @@
             <div id="section-cam" class="hidden flex flex-col space-y-4">
                 <div class="bg-blue-950/30 border border-blue-900/50 p-3.5 rounded-xl space-y-3">
                     <div>
-                        <label class="block text-[11px] font-mono text-cyan-400 uppercase tracking-wider mb-1">ඔයාගේ කැමරා නම (Cam ID)</label>
-                        <input type="text" id="cam-node-id" placeholder="උදා: cam-1" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-300 font-mono text-sm focus:outline-none" value="cam-1">
+                        <label class="block text-[11px] font-mono text-cyan-400 uppercase tracking-wider mb-1">කැමරා නම (Cam ID)</label>
+                        <input type="text" id="cam-node-id" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-300 font-mono text-sm focus:outline-none" value="cam-1">
                     </div>
                     <div>
                         <label class="block text-[11px] font-mono text-cyan-400 uppercase tracking-wider mb-1">Host Room ID එක දෙන්න</label>
-                        <input type="text" id="target-host-id" placeholder="උදා: zorex-room-01" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-300 font-mono text-sm focus:outline-none" value="zorex-room-01">
+                        <input type="text" id="target-host-id" class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-cyan-300 font-mono text-sm focus:outline-none" value="zorex-room-01">
                     </div>
                     <button onclick="sendJoinRequest()" class="w-full py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 text-gray-950 font-bold rounded-lg transition text-xs shadow-lg">
-                        <i class="fa-solid fa-paper-plane mr-1"></i> Send Join Request to Host
+                        <i class="fa-solid fa-paper-plane mr-1"></i> Send Join Request
                     </button>
                 </div>
 
@@ -147,7 +147,7 @@
         let currentFacingMode = 'environment';
         let silentAudioCtx = null;
         let currentMode = 'host';
-        let activeConnections = {}; // Store data connections for signaling
+        let pendingConnections = {}; // Store pending connection objects
 
         const peerOptions = {
             config: {
@@ -158,6 +158,7 @@
             }
         };
 
+        // --- HOST LOGIC ---
         function initHostPeer(roomId) {
             if (peer) { try { peer.destroy(); } catch(e) {} }
 
@@ -177,18 +178,29 @@
 
             // Host receives data connection / join requests from Cam Nodes
             peer.on('connection', (conn) => {
-                conn.on('data', (data) => {
-                    if (data.type === 'JOIN_REQUEST') {
-                        addIncomingRequest(conn.peer, data.camId);
-                    }
+                conn.on('open', () => {
+                    conn.on('data', (data) => {
+                        if (data.type === 'JOIN_REQUEST') {
+                            pendingConnections[conn.peer] = { conn: conn, camId: data.camId };
+                            addIncomingRequest(conn.peer, data.camId);
+                        }
+                    });
                 });
             });
 
-            // Host receives incoming video stream calls from accepted cams
+            // Host receives direct incoming video stream calls from Cam Nodes
             peer.on('call', (call) => {
-                call.answer(); // Answer incoming call with empty stream (Host doesn't send video)
+                call.answer(); // Answer incoming call from cam node
                 call.on('stream', (remoteStream) => {
-                    assignStreamToNextSlot(call.peer, remoteStream);
+                    // Find camId associated with this peer if possible, or use peer id
+                    let camLabel = call.peer;
+                    for (let pId in pendingConnections) {
+                        if (pendingConnections[pId].conn.peer === call.peer) {
+                            camLabel = pendingConnections[pId].camId;
+                            break;
+                        }
+                    }
+                    assignStreamToNextSlot(camLabel, remoteStream);
                 });
             });
         }
@@ -196,14 +208,51 @@
         function createCCTVRoom() {
             const roomId = document.getElementById('host-room-id').value.trim();
             if (!roomId) {
-                alert("ਕሩණාකර Room ID එකක් ඇතුළත් කරන්න!");
+                alert("කරුණාකර Room ID එකක් ඇතුළත් කරන්න!");
                 return;
             }
             initHostPeer(roomId);
             alert("CCTV Room created successfully: " + roomId);
         }
 
-        // Cam Node sends connection request to Host
+        // Host side: Display incoming request with Accept button
+        function addIncomingRequest(peerId, camId) {
+            const container = document.getElementById('requests-container');
+            if (container.querySelector('p')) {
+                container.innerHTML = '';
+            }
+
+            // Avoid duplicate requests display
+            if (document.getElementById(`req-${peerId}`)) return;
+
+            const reqDiv = document.createElement('div');
+            reqDiv.id = `req-${peerId}`;
+            reqDiv.className = "flex items-center justify-between bg-gray-800 p-2 rounded-lg border border-gray-700";
+            reqDiv.innerHTML = `
+                <span class="text-cyan-300">${camId}</span>
+                <button onclick="acceptCamera('${peerId}', '${camId}')" class="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-bold rounded text-xs transition">
+                    Accept
+                </button>
+            `;
+            container.appendChild(reqDiv);
+        }
+
+        // Host accepts camera by sending a data message back to Cam Node telling it to stream
+        function acceptCamera(peerId, camId) {
+            const reqData = pendingConnections[peerId];
+            if (reqData && reqData.conn) {
+                reqData.conn.send({ type: 'ACCEPT_REQUEST' });
+                alert(`${camId} accepted! Waiting for camera stream...`);
+                
+                // Remove from request UI
+                const reqEl = document.getElementById(`req-${peerId}`);
+                if (reqEl) reqEl.remove();
+            } else {
+                alert("Connection reference not found. Ask cam to resend request.");
+            }
+        }
+
+        // --- CAM NODE LOGIC ---
         function sendJoinRequest() {
             const camId = document.getElementById('cam-node-id').value.trim();
             const hostId = document.getElementById('target-host-id').value.trim();
@@ -215,66 +264,42 @@
 
             if (peer) { try { peer.destroy(); } catch(e) {} }
 
-            // Cam node connects with a temporary random ID, but registers its name
             peer = new Peer(peerOptions);
 
             peer.on('open', (id) => {
-                updateStatus('Connected to network, sending request...', 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30');
+                updateStatus('Connecting to Host...', 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30');
                 
-                // Connect to Host via DataConnection
                 const conn = peer.connect(hostId);
                 
                 conn.on('open', () => {
                     conn.send({ type: 'JOIN_REQUEST', camId: camId });
-                    updateStatus('Join Request Sent to Host!', 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30');
+                    updateStatus('Join Request Sent! Waiting for Host Accept...', 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30');
                     alert("Join Request sent to Host! Please wait for Host to Accept.");
                 });
 
+                // Listen for Accept signal from Host
+                conn.on('data', (data) => {
+                    if (data.type === 'ACCEPT_REQUEST') {
+                        updateStatus('Host Accepted! Streaming...', 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30');
+                        
+                        // Automatically push local stream to Host via direct WebRTC call
+                        if (myStream) {
+                            const call = peer.call(hostId, myStream);
+                            call.on('error', (err) => {
+                                console.error("Stream push error:", err);
+                                alert("Stream push error: " + err);
+                            });
+                            alert("Host accepted! Camera stream is now broadcasting live.");
+                        } else {
+                            alert("Host accepted, but Camera is not started yet! Please click 'Start Camera Stream'.");
+                        }
+                    }
+                });
+
                 conn.on('error', (err) => {
-                    alert("Host වෙත සම්බන්ධ වීම අසාර්ථකයි! Host ID එක නිවැරදි දැයි පරීක්ෂා කරන්න.");
+                    alert("Host වෙත සම්බන්ධ වීම අසාර්ථකයි!");
                 });
             });
-
-            // When Host accepts and calls back the Cam Node
-            peer.on('call', (call) => {
-                if (myStream) {
-                    call.answer(myStream); // Send camera stream to Host
-                    updateStatus('STREAMING TO HOST', 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30');
-                } else {
-                    alert("කරුණාකර මුලින් 'Start Camera Stream' දෙන්න!");
-                    call.close();
-                }
-            });
-        }
-
-        // Host side: Display incoming request with Accept button
-        function addIncomingRequest(peerId, camId) {
-            const container = document.getElementById('requests-container');
-            if (container.querySelector('p')) {
-                container.innerHTML = ''; // Remove 'No pending requests'
-            }
-
-            const reqDiv = document.createElement('div');
-            reqDiv.className = "flex items-center justify-between bg-gray-800 p-2 rounded-lg border border-gray-700";
-            reqDiv.innerHTML = `
-                <span class="text-cyan-300">${camId}</span>
-                <button onclick="acceptCamera('${peerId}', '${camId}')" class="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-gray-950 font-bold rounded text-xs transition">
-                    Accept
-                </button>
-            `;
-            container.appendChild(reqDiv);
-        }
-
-        // Host accepts camera and calls the camera peer back to receive video stream
-        function acceptCamera(peerId, camId) {
-            if (!myStream) {
-                // Host calls with empty stream
-                const call = peer.call(peerId, new MediaStream());
-                call.on('stream', (remoteStream) => {
-                    assignStreamToNextSlot(camId, remoteStream);
-                });
-                alert(`Accepted ${camId}! Connecting stream...`);
-            }
         }
 
         // Assign incoming stream to available grid slot (1 to 6)
@@ -284,8 +309,7 @@
                 const placeholderEl = document.getElementById(`placeholder-${i}`);
                 const labelEl = document.getElementById(`label-${i}`);
 
-                // If slot is empty or already assigned to this camera
-                if (placeholderEl.classList.contains('hidden') === false || videoEl.srcObject === null) {
+                if (videoEl.srcObject === null || placeholderEl.classList.contains('hidden') === false) {
                     videoEl.srcObject = stream;
                     videoEl.classList.remove('hidden');
                     placeholderEl.classList.add('hidden');
@@ -338,7 +362,7 @@
                 document.getElementById('local-video').srcObject = myStream;
                 playSilentAudio();
 
-                alert("Camera Started! Now click 'Send Join Request to Host'.");
+                alert("Camera Started Successfully!");
             } catch (err) {
                 console.error(err);
                 alert("Camera Error: " + err.message);
