@@ -103,7 +103,7 @@
                     <button onclick="flipCamera()" class="w-full py-2.5 bg-gray-800 hover:bg-gray-700 text-gray-200 rounded-xl transition text-xs flex items-center justify-center space-x-2 border border-gray-700">
                         <i class="fa-solid fa-camera-rotate"></i> <span>Flip Camera</span>
                     </button>
-                    <p class="text-[10px] text-cyan-300/80 text-center mt-1"><i class="fa-solid fa-shield-halved"></i> Minimize කළත් කැමරාව ක්‍රියාත්මක වේ.</p>
+                    <p class="text-[10px] text-cyan-300/80 text-center mt-1"><i class="fa-solid fa-shield-halved"></i> Minimize කළත්, වෙනත් App වලට ගියත්, Screen එක Off වුණත් කැමරාව දිගටම ක්‍රියාත්මක වේ.</p>
                 </div>
             </div>
         </div>
@@ -148,6 +148,7 @@
         let silentAudioCtx = null;
         let currentMode = 'host';
         let pendingConnections = {};
+        let wakeLock = null;
 
         const peerOptions = {
             config: {
@@ -295,7 +296,6 @@
 
         // Prevent duplicates: Check if camera is already assigned to a slot
         function assignStreamToNextSlot(labelName, stream) {
-            // 1. Check if this camera label is already active in any slot, update it if so
             for (let i = 1; i <= 6; i++) {
                 const labelEl = document.getElementById(`label-${i}`);
                 if (labelEl && labelEl.innerText === labelName && !labelEl.classList.contains('hidden')) {
@@ -305,7 +305,6 @@
                 }
             }
 
-            // 2. Otherwise find the next available empty slot
             for (let i = 1; i <= 6; i++) {
                 const videoEl = document.getElementById(`video-${i}`);
                 const placeholderEl = document.getElementById(`placeholder-${i}`);
@@ -356,21 +355,31 @@
                     myStream.getTracks().forEach(track => track.stop());
                 }
 
+                // High compatibility constraints for background streaming
                 myStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: currentFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+                    video: { 
+                        facingMode: currentFacingMode, 
+                        width: { ideal: 1280 }, 
+                        height: { ideal: 720 },
+                        frameRate: { ideal: 24, max: 30 }
+                    },
                     audio: true
                 });
 
-                document.getElementById('local-video').srcObject = myStream;
+                const localVideo = document.getElementById('local-video');
+                localVideo.srcObject = myStream;
+                
                 playSilentAudio();
+                requestWakeLock();
 
-                alert("Camera Started Successfully!");
+                alert("Camera Started Successfully! You can now minimize browser or switch apps.");
             } catch (err) {
                 console.error(err);
                 alert("Camera Error: " + err.message);
             }
         }
 
+        // Background Keep-Alive Audio Trick
         function playSilentAudio() {
             const audioEl = document.getElementById('silent-audio');
             audioEl.play().catch(e => console.log("Audio autoplay restricted:", e));
@@ -386,6 +395,27 @@
                 oscillator.start();
             }
         }
+
+        // Screen Wake Lock API to prevent device from sleeping / pausing camera tracks
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Wake Lock was released');
+                    });
+                } catch (err) {
+                    console.error(`${err.name}, ${err.message}`);
+                }
+            }
+        }
+
+        // Re-acquire wake lock if visibility changes back to visible
+        document.addEventListener('visibilitychange', async () => {
+            if (wakeLock !== null && document.visibilityState === 'visible') {
+                await requestWakeLock();
+            }
+        });
 
         async function flipCamera() {
             currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
