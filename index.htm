@@ -147,7 +147,7 @@
         let currentFacingMode = 'environment';
         let silentAudioCtx = null;
         let currentMode = 'host';
-        let pendingConnections = {}; // Store pending connection objects
+        let pendingConnections = {};
 
         const peerOptions = {
             config: {
@@ -176,7 +176,6 @@
                 updateStatus('Error: ' + err.type, 'bg-red-500/10 text-red-400 border-red-500/30');
             });
 
-            // Host receives data connection / join requests from Cam Nodes
             peer.on('connection', (conn) => {
                 conn.on('open', () => {
                     conn.on('data', (data) => {
@@ -188,11 +187,9 @@
                 });
             });
 
-            // Host receives direct incoming video stream calls from Cam Nodes
             peer.on('call', (call) => {
-                call.answer(); // Answer incoming call from cam node
+                call.answer();
                 call.on('stream', (remoteStream) => {
-                    // Find camId associated with this peer if possible, or use peer id
                     let camLabel = call.peer;
                     for (let pId in pendingConnections) {
                         if (pendingConnections[pId].conn.peer === call.peer) {
@@ -215,14 +212,12 @@
             alert("CCTV Room created successfully: " + roomId);
         }
 
-        // Host side: Display incoming request with Accept button
         function addIncomingRequest(peerId, camId) {
             const container = document.getElementById('requests-container');
             if (container.querySelector('p')) {
                 container.innerHTML = '';
             }
 
-            // Avoid duplicate requests display
             if (document.getElementById(`req-${peerId}`)) return;
 
             const reqDiv = document.createElement('div');
@@ -237,18 +232,16 @@
             container.appendChild(reqDiv);
         }
 
-        // Host accepts camera by sending a data message back to Cam Node telling it to stream
         function acceptCamera(peerId, camId) {
             const reqData = pendingConnections[peerId];
             if (reqData && reqData.conn) {
                 reqData.conn.send({ type: 'ACCEPT_REQUEST' });
                 alert(`${camId} accepted! Waiting for camera stream...`);
                 
-                // Remove from request UI
                 const reqEl = document.getElementById(`req-${peerId}`);
                 if (reqEl) reqEl.remove();
             } else {
-                alert("Connection reference not found. Ask cam to resend request.");
+                alert("Connection reference not found.");
             }
         }
 
@@ -277,12 +270,10 @@
                     alert("Join Request sent to Host! Please wait for Host to Accept.");
                 });
 
-                // Listen for Accept signal from Host
                 conn.on('data', (data) => {
                     if (data.type === 'ACCEPT_REQUEST') {
                         updateStatus('Host Accepted! Streaming...', 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30');
                         
-                        // Automatically push local stream to Host via direct WebRTC call
                         if (myStream) {
                             const call = peer.call(hostId, myStream);
                             call.on('error', (err) => {
@@ -302,8 +293,19 @@
             });
         }
 
-        // Assign incoming stream to available grid slot (1 to 6)
+        // Prevent duplicates: Check if camera is already assigned to a slot
         function assignStreamToNextSlot(labelName, stream) {
+            // 1. Check if this camera label is already active in any slot, update it if so
+            for (let i = 1; i <= 6; i++) {
+                const labelEl = document.getElementById(`label-${i}`);
+                if (labelEl && labelEl.innerText === labelName && !labelEl.classList.contains('hidden')) {
+                    const videoEl = document.getElementById(`video-${i}`);
+                    videoEl.srcObject = stream;
+                    return;
+                }
+            }
+
+            // 2. Otherwise find the next available empty slot
             for (let i = 1; i <= 6; i++) {
                 const videoEl = document.getElementById(`video-${i}`);
                 const placeholderEl = document.getElementById(`placeholder-${i}`);
@@ -392,7 +394,6 @@
             }
         }
 
-        // Initialize on load as Host Room
         window.onload = () => {
             switchMode('host');
         };
