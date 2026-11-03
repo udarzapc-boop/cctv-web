@@ -150,11 +150,15 @@
         let pendingConnections = {};
         let wakeLock = null;
 
+        // Enhanced STUN servers list for cross-network (Internet / Mobile Data) traversal
         const peerOptions = {
             config: {
                 iceServers: [
                     { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
+                    { urls: 'stun:stun1.l.google.com:19302' },
+                    { urls: 'stun:stun2.l.google.com:19302' },
+                    { urls: 'stun:stun3.l.google.com:19302' },
+                    { urls: 'stun:stun.services.mozilla.com' }
                 ]
             }
         };
@@ -167,6 +171,11 @@
 
             peer.on('open', (id) => {
                 updateStatus('Host Room Active: ' + id, 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30');
+            });
+
+            peer.on('disconnected', () => {
+                updateStatus('Disconnected! Reconnecting...', 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30');
+                setTimeout(() => { if (peer && peer.disconnected) peer.reconnect(); }, 3000);
             });
 
             peer.on('error', (err) => {
@@ -261,7 +270,7 @@
             peer = new Peer(peerOptions);
 
             peer.on('open', (id) => {
-                updateStatus('Connecting to Host...', 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30');
+                updateStatus('Connecting to Host across Internet...', 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30');
                 
                 const conn = peer.connect(hostId);
                 
@@ -289,12 +298,16 @@
                 });
 
                 conn.on('error', (err) => {
-                    alert("Host වෙත සම්බන්ධ වීම අසාර්ථකයි!");
+                    alert("Host වෙත සම්බන්ධ වීම අසාර්ථකයි! Network එක පරීක්ෂා කරන්න.");
                 });
+            });
+
+            peer.on('disconnected', () => {
+                updateStatus('Disconnected! Reconnecting...', 'bg-yellow-500/10 text-yellow-400 border-yellow-500/30');
+                setTimeout(() => { if (peer && peer.disconnected) peer.reconnect(); }, 3000);
             });
         }
 
-        // Prevent duplicates: Check if camera is already assigned to a slot
         function assignStreamToNextSlot(labelName, stream) {
             for (let i = 1; i <= 6; i++) {
                 const labelEl = document.getElementById(`label-${i}`);
@@ -355,7 +368,6 @@
                     myStream.getTracks().forEach(track => track.stop());
                 }
 
-                // High compatibility constraints for background streaming
                 myStream = await navigator.mediaDevices.getUserMedia({
                     video: { 
                         facingMode: currentFacingMode, 
@@ -379,7 +391,6 @@
             }
         }
 
-        // Background Keep-Alive Audio Trick
         function playSilentAudio() {
             const audioEl = document.getElementById('silent-audio');
             audioEl.play().catch(e => console.log("Audio autoplay restricted:", e));
@@ -396,7 +407,6 @@
             }
         }
 
-        // Screen Wake Lock API to prevent device from sleeping / pausing camera tracks
         async function requestWakeLock() {
             if ('wakeLock' in navigator) {
                 try {
@@ -410,7 +420,6 @@
             }
         }
 
-        // Re-acquire wake lock if visibility changes back to visible
         document.addEventListener('visibilitychange', async () => {
             if (wakeLock !== null && document.visibilityState === 'visible') {
                 await requestWakeLock();
